@@ -1,0 +1,17 @@
+# PDF processing and text extraction
+PyPDF2>=3.0.0
+pdfplumber>=0.10.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
+pdf2image>=1.16.0
+
+# Data processing and analysis
+pandas>=2.0.0
+numpy>=1.24.0
+
+# CLI and utilities
+click>=8.1.0
+tqdm>=4.65.0
+
+# Configuration and logging
+python-dotenv>=1.0.0

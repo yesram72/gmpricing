@@ -1,0 +1,31 @@
+{
+  "file_handler": {
+    "output_dir": "output",
+    "pdf_extractor": {
+      "use_pdfplumber": true
+    },
+    "ocr_extractor": {
+      "dpi": 300,
+      "language": "eng"
+    }
+  },
+  "pricing": {
+    "default_price": 200.0,
+    "self_pay_discount": 0.20,
+    "custom_prices": {},
+    "procedure_multipliers": {}
+  },
+  "validator": {
+    "min_confidence": 30.0,
+    "require_patient_id": false,
+    "require_procedure_codes": true,
+    "max_age": 150,
+    "min_age": 0
+  },
+  "logging": {
+    "log_to_file": true,
+    "separate_error_log": true,
+    "max_log_size": 10485760,
+    "backup_count": 5
+  }
+}

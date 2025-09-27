@@ -1,0 +1,52 @@
+GENERAL MEDICAL CENTER
+PATIENT MEDICAL RECORD
+
+Patient Information:
+Patient ID: MRN789012
+Patient Name: Sarah Johnson
+Age: 67 years old
+Date of Birth: 05/15/1957
+Date of Service: 09/27/2024
+
+Insurance Information:
+Primary Insurance: Medicare (Public)
+Secondary Insurance: None
+Coverage: 70% covered by Medicare
+Patient Responsibility: 30%
+
+Clinical Information:
+CHIEF COMPLAINT: Chest pain and shortness of breath
+
+DIAGNOSIS CODES:
+- Acute myocardial infarction (I21.9)
+- Hypertensive heart disease (I11.9)
+- Diabetes mellitus, type 2 (E11.9)
+
+PROCEDURES PERFORMED:
+1. Emergency department visit - high complexity (99285)
+2. Electrocardiogram (93000)
+3. Chest X-ray (71020)
+4. Blood work - comprehensive metabolic panel (80053)
+
+TREATMENT:
+- Emergency stabilization
+- Cardiac monitoring
+- IV medications administered
+- Patient transferred to cardiology unit
+
+FACILITY INFORMATION:
+Provider: Dr. Michael Rodriguez, MD
+Department: Emergency Medicine
+Facility: General Medical Center Emergency Department
+
+BILLING NOTES:
+Total procedures: 4
+Emergency visit classification: Level 5
+Requires pre-authorization for cardiac procedures
+Insurance verified: Yes
+
+Additional Notes:
+- Patient arrived via ambulance
+- High-priority case
+- Cardiology consultation requested
+- Follow-up appointment scheduled
