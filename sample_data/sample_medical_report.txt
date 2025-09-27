@@ -1,0 +1,26 @@
+MEDICAL REPORT
+
+Patient ID: MRN123456
+Patient Name: John Smith
+Age: 45 years old
+Date of Service: 03/15/2024
+
+DIAGNOSIS:
+- Essential hypertension (I10)
+- Type 2 diabetes mellitus (E11.9)
+
+PROCEDURES PERFORMED:
+- Office visit, established patient (99213)
+- Blood pressure check
+- Diabetes monitoring
+
+INSURANCE:
+Insurance Type: Private Insurance (Aetna)
+Coverage: 85% covered
+
+BILLING:
+Procedure Code: 99213
+Estimated Cost: $175.00
+
+Provider: Dr. Jane Medical
+Facility: General Medical Center
