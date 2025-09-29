@@ -55,7 +55,8 @@ def parse_num(x):
     s = str(x).strip()
     if s in ("", "-", "—", "–"):
         return None
-    s = re.sub(r"[^0-9\-,."]", "", s)
+    # keep digits, minus and dot; we'll strip commas next
+    s = re.sub(r"[^0-9\-\.]+", "", s)
     s = s.replace(",", "")
     try:
         return float(s)
