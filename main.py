@@ -14,12 +14,12 @@ if uploaded_file:
     tables = extract_dha_tables("uploaded_dha.xml")
 
     # Extract header info from XML or ask user for input
-    customer = st.text_input("Customer Name", value="")  # Prompt for input if not parsed
-    policy_effective = st.text_input("Policy Effective Date", value="")  # Prompt for input if not parsed
-    policy_expiry = st.text_input("Policy Expiry Date", value="")        # Prompt for input if not parsed
-    reporting_date = tables["report_date"]
-    num_days = st.text_input("Number of days", value="")  # Optional user input
-    
+    customer = st.text_input("Customer Name", value="")
+    policy_effective = st.text_input("Policy Effective Date", value="")
+    policy_expiry = st.text_input("Policy Expiry Date", value="")
+    reporting_date = tables.get("report_date", "")
+    num_days = st.text_input("Number of days", value="")
+
     header_df = pd.DataFrame({
         "Customer": [customer],
         "Policy effective date": [policy_effective],
@@ -33,19 +33,31 @@ if uploaded_file:
 
     # Section 6
     st.subheader("Population census (beginning of reporting period)")
-    st.dataframe(tables["population_census_beginning"])
+    if tables.get("population_census_beginning") is not None:
+        st.dataframe(tables["population_census_beginning"])
+    else:
+        st.info("Section 6: Population census (beginning) not found in XML.")
 
     # Section 7
     st.subheader("Population census (end of reporting period)")
-    st.dataframe(tables["population_census_end"])
+    if tables.get("population_census_end") is not None:
+        st.dataframe(tables["population_census_end"])
+    else:
+        st.info("Section 7: Population census (end) not found in XML.")
 
     # Section 17
     st.subheader("Total claims Processed per service month (by AED value)")
-    st.dataframe(tables["claims_by_month"])
+    if tables.get("claims_by_month") is not None:
+        st.dataframe(tables["claims_by_month"])
+    else:
+        st.info("Section 17: Claims by month not found in XML.")
 
     # Section 8
     st.subheader("Claims data by member type (value AED)")
-    st.dataframe(tables["claims_by_member"])
+    if tables.get("claims_by_member") is not None:
+        st.dataframe(tables["claims_by_member"])
+    else:
+        st.info("Section 8: Claims by member type not found in XML.")
 
 else:
     st.info("Please upload a DHA XML report to begin.")
