@@ -1,30 +1,25 @@
 import streamlit as st
 import pandas as pd
-import PyPDF2
-from datetime import datetime
+from extract_dha_xml import extract_dha_tables
 
 st.set_page_config(page_title="DHA Report Extractor", layout="wide")
-st.title("DHA Report PDF Extractor")
+st.title("DHA Report PDF/XML Extractor")
 
-uploaded_file = st.file_uploader("Upload DHA Report PDF", type="pdf")
+uploaded_file = st.file_uploader("Upload DHA Report XML", type=["xml"])
 
 if uploaded_file:
-    # Placeholder: extract text from PDF
-    reader = PyPDF2.PdfReader(uploaded_file)
-    pdf_text = ""
-    for page in reader.pages:
-        pdf_text += page.extract_text() or ""
+    # Save uploaded file temporarily
+    with open("uploaded_dha.xml", "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    tables = extract_dha_tables("uploaded_dha.xml")
 
-    # --- Placeholder extraction (to be replaced with actual parsing logic) ---
-    # For demo, use static/dummy data as per your spec
-
-    # HEADER (demo values)
-    customer = "Demo Scheme"
-    policy_effective = "2025-06-01"
-    policy_expiry = "2025-12-31"
-    reporting_date = datetime.now().strftime("%Y-%m-%d")
-    num_days = (datetime.strptime(policy_expiry, "%Y-%m-%d") - datetime.now()).days
-
+    # Extract header info from XML or ask user for input
+    customer = st.text_input("Customer Name", value="")  # Prompt for input if not parsed
+    policy_effective = st.text_input("Policy Effective Date", value="")  # Prompt for input if not parsed
+    policy_expiry = st.text_input("Policy Expiry Date", value="")        # Prompt for input if not parsed
+    reporting_date = tables["report_date"]
+    num_days = st.text_input("Number of days", value="")  # Optional user input
+    
     header_df = pd.DataFrame({
         "Customer": [customer],
         "Policy effective date": [policy_effective],
@@ -36,16 +31,21 @@ if uploaded_file:
     st.subheader("Header Information")
     st.dataframe(header_df)
 
-    # TABLE (demo values)
-    table_df = pd.DataFrame({
-        "Month": ["2024 SEPTEMBER", "2024 OCTOBER", "2024 NOVEMBER", "2024 DECEMBER",
-                  "2025 JANUARY", "2025 FEBRUARY", "2025 MARCH", "2025 APRIL", "2025 MAY", "TOTAL"],
-        "Value": [911791, 991189, 996378, 777027, 826596, 908013, 666542, 640463, 393375, "########"]
-    })
+    # Section 6
+    st.subheader("Population census (beginning of reporting period)")
+    st.dataframe(tables["population_census_beginning"])
 
+    # Section 7
+    st.subheader("Population census (end of reporting period)")
+    st.dataframe(tables["population_census_end"])
+
+    # Section 17
     st.subheader("Total claims Processed per service month (by AED value)")
-    st.dataframe(table_df)
+    st.dataframe(tables["claims_by_month"])
 
-    # Add more tables for census/claims by member as needed
+    # Section 8
+    st.subheader("Claims data by member type (value AED)")
+    st.dataframe(tables["claims_by_member"])
+
 else:
-    st.info("Please upload a DHA PDF report to begin.")
+    st.info("Please upload a DHA XML report to begin.")
