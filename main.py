@@ -3,6 +3,7 @@ import pandas as pd
 import io
 from typing import List, Dict, Optional, Tuple
 import re
+import PyPDF2
 
 # Try importing PDF extraction libraries
 PDF_LIBS_AVAILABLE = {
@@ -91,6 +92,72 @@ class DHAReportExtractor:
             st.warning(f"camelot-{flavor} extraction failed: {str(e)}")
         return tables
     
+    def extract_with_pypdf2_fallback(self, file_bytes: bytes) -> List[pd.DataFrame]:
+        """Fallback extraction using PyPDF2 for basic text extraction."""
+        tables = []
+        try:
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            all_text = ""
+            
+            for page in pdf_reader.pages:
+                all_text += page.extract_text() + "\n"
+            
+            # Try to parse structured text into tables
+            lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+            
+            # Look for table-like patterns (rows with multiple columns separated by spaces/tabs)
+            table_lines = []
+            for line in lines:
+                # Check if line has multiple columns (spaces between words)
+                words = line.split()
+                if len(words) >= 3 and any(word.replace('.', '').replace(',', '').isdigit() for word in words):
+                    table_lines.append(words)
+            
+            # Group table lines into tables based on structure similarity
+            if table_lines:
+                # Create a simple table from the structured text
+                max_cols = max(len(row) for row in table_lines)
+                
+                # Pad rows to have the same number of columns
+                padded_rows = []
+                for row in table_lines:
+                    padded_row = row + [''] * (max_cols - len(row))
+                    padded_rows.append(padded_row[:max_cols])
+                
+                if padded_rows:
+                    # Use the first row as headers if it looks like headers
+                    if padded_rows and not any(word.replace('.', '').replace(',', '').isdigit() for word in padded_rows[0]):
+                        df = pd.DataFrame(padded_rows[1:], columns=padded_rows[0])
+                    else:
+                        df = pd.DataFrame(padded_rows)
+                    tables.append(df)
+                    
+        except Exception as e:
+            st.warning(f"PyPDF2 fallback extraction failed: {str(e)}")
+        
+        return tables
+        """Extract tables using tabula."""
+        if not PDF_LIBS_AVAILABLE['tabula']:
+            return []
+            
+        tables = []
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
+                tmp_file.write(file_bytes)
+                tmp_file_path = tmp_file.name
+            
+            tabula_tables = tabula.read_pdf(tmp_file_path, pages='all', lattice=lattice, multiple_tables=True)
+            for table in tabula_tables:
+                if not table.empty:
+                    tables.append(table)
+                    
+            # Clean up temp file  
+            import os
+            os.unlink(tmp_file_path)
+            
+        except Exception as e:
+            st.warning(f"tabula-{'lattice' if lattice else 'stream'} extraction failed: {str(e)}")
     def extract_with_tabula(self, file_bytes: bytes, lattice: bool = True) -> List[pd.DataFrame]:
         """Extract tables using tabula."""
         if not PDF_LIBS_AVAILABLE['tabula']:
@@ -133,6 +200,9 @@ class DHAReportExtractor:
         if PDF_LIBS_AVAILABLE['tabula']:
             all_tables['tabula-lattice'] = self.extract_with_tabula(file_bytes, True)
             all_tables['tabula-stream'] = self.extract_with_tabula(file_bytes, False)
+        
+        # Always try PyPDF2 fallback
+        all_tables['pypdf2-fallback'] = self.extract_with_pypdf2_fallback(file_bytes)
             
         return all_tables
 
@@ -269,22 +339,31 @@ def main():
     else:
         st.sidebar.warning("No PDF extraction libraries installed. Upload will work with fallback text extraction.")
     
+    # Add demo mode toggle
+    st.sidebar.header("Demo Mode")
+    demo_mode = st.sidebar.checkbox("Enable demo mode (use mock data)", help="Demonstrates app functionality with sample DHA report data")
+    
     # File upload
     uploaded_file = st.file_uploader("Upload DHA PDF report", type=['pdf'])
     
-    if uploaded_file is not None:
-        st.success(f"Uploaded: {uploaded_file.name}")
-        
-        # Read file bytes
-        file_bytes = uploaded_file.read()
+    if uploaded_file is not None or demo_mode:
+        if demo_mode:
+            st.info("🎭 Demo mode enabled - using mock DHA report data")
+            file_bytes = b"mock_data"  # Not used in demo mode
+        else:
+            st.success(f"Uploaded: {uploaded_file.name}")
+            file_bytes = uploaded_file.read()
         
         # Initialize processors
         extractor = DHAReportExtractor()
         processor = DHATableProcessor()
         
-        # Extract tables using all available engines
-        with st.spinner("Extracting tables from PDF..."):
-            all_extracted_tables = extractor.extract_all_tables(file_bytes)
+        # Extract tables using all available engines or create mock data
+        if demo_mode:
+            all_extracted_tables = create_mock_extracted_tables()
+        else:
+            with st.spinner("Extracting tables from PDF..."):
+                all_extracted_tables = extractor.extract_all_tables(file_bytes)
         
         # Show extraction results
         st.header("📊 Extracted Sections")
@@ -292,27 +371,31 @@ def main():
         # Process each section
         sections_data = {}
         
-        # Try to find and process each section from the extracted tables
-        for engine_name, tables in all_extracted_tables.items():
-            if tables:  # If this engine found tables
-                
-                # Process Population Census (Sections 6 & 7)
-                if 'population_census' not in sections_data:
-                    pop_census = processor.process_population_census(tables)
-                    if pop_census is not None and not pop_census.empty:
-                        sections_data['population_census'] = pop_census
-                        
-                # Process Claims by Member Type (Section 8)  
-                if 'claims_by_member' not in sections_data:
-                    claims_member = processor.process_claims_by_member_type(tables)
-                    if claims_member is not None and not claims_member.empty:
-                        sections_data['claims_by_member'] = claims_member
-                        
-                # Process Claims per Service Month (Section 17)
-                if 'claims_per_month' not in sections_data:
-                    claims_month = processor.process_claims_per_service_month(tables)
-                    if claims_month is not None and not claims_month.empty:
-                        sections_data['claims_per_month'] = claims_month
+        if demo_mode:
+            # Use mock processed data
+            sections_data = create_mock_processed_sections()
+        else:
+            # Try to find and process each section from the extracted tables
+            for engine_name, tables in all_extracted_tables.items():
+                if tables:  # If this engine found tables
+                    
+                    # Process Population Census (Sections 6 & 7)
+                    if 'population_census' not in sections_data:
+                        pop_census = processor.process_population_census(tables)
+                        if pop_census is not None and not pop_census.empty:
+                            sections_data['population_census'] = pop_census
+                            
+                    # Process Claims by Member Type (Section 8)  
+                    if 'claims_by_member' not in sections_data:
+                        claims_member = processor.process_claims_by_member_type(tables)
+                        if claims_member is not None and not claims_member.empty:
+                            sections_data['claims_by_member'] = claims_member
+                            
+                    # Process Claims per Service Month (Section 17)
+                    if 'claims_per_month' not in sections_data:
+                        claims_month = processor.process_claims_per_service_month(tables)
+                        if claims_month is not None and not claims_month.empty:
+                            sections_data['claims_per_month'] = claims_month
         
         # Display processed sections
         col1, col2 = st.columns(2)
@@ -360,6 +443,9 @@ def main():
         
         # Debug section - show all extracted tables
         with st.expander("🔍 Show ALL extracted tables (diagnostics)"):
+            if demo_mode:
+                st.info("Demo mode: Showing mock extraction results")
+            
             for engine_name, tables in all_extracted_tables.items():
                 if tables:
                     st.write(f"**{engine_name.upper()} Engine Results:**")
@@ -401,6 +487,80 @@ def main():
                 'Totals': ['100000', '61500', '39000', '200500']
             })
             st.dataframe(example_claims)
+
+def create_mock_extracted_tables() -> Dict[str, List[pd.DataFrame]]:
+    """Create mock extracted tables to demonstrate functionality."""
+    mock_tables = {}
+    
+    # Mock pdfplumber results
+    mock_tables['pdfplumber'] = [
+        pd.DataFrame({
+            'Category': ['6a Male', '6b Single females', '6c Married females'],
+            '0-15': [145, 132, 128],
+            '16-25': [95, 105, 112],
+            '26-35': [85, 95, 118],
+            '36-50': [75, 88, 102],
+            '51-65': [52, 62, 75],
+            'Over 65': [28, 35, 42]
+        }),
+        pd.DataFrame({
+            'Member Type': ['8a Employee', '8b Spouse', '8c Dependents', '8d Totals'],
+            'IP': [52000, 31500, 21200, 104700],
+            'OP': [26500, 16800, 11300, 54600],
+            'Pharmacy': [18200, 12400, 7800, 38400],
+            'Dental': [9200, 6100, 3900, 19200],
+            'Optical': [2800, 1900, 1200, 5900]
+        }),
+        pd.DataFrame({
+            'Month': ['Jan-2024', 'Feb-2024', 'Mar-2024', 'Apr-2024', 'May-2024', 'Jun-2024',
+                     'Jul-2024', 'Aug-2024', 'Sep-2024', 'Oct-2024', 'Nov-2024', 'Dec-2024'],
+            'Year': [2024] * 12,
+            'Value': [45000, 47200, 51300, 48900, 52100, 49800, 53200, 50400, 48600, 51800, 49300, 52400]
+        })
+    ]
+    
+    # Mock other engines with empty results
+    mock_tables['camelot-lattice'] = []
+    mock_tables['camelot-stream'] = []
+    mock_tables['tabula-lattice'] = []
+    mock_tables['tabula-stream'] = []
+    mock_tables['pypdf2-fallback'] = []
+    
+    return mock_tables
+
+def create_mock_processed_sections() -> Dict[str, pd.DataFrame]:
+    """Create mock processed section data."""
+    return {
+        'population_census': pd.DataFrame({
+            'Category': ['6a Male', '6b Single females', '6c Married females', 
+                        '7a Male', '7b Single females', '7c Married females'],
+            '0-15': ['145', '132', '128', '138', '125', '142'],
+            '16-25': ['95', '105', '112', '102', '98', '108'],
+            '26-35': ['85', '95', '118', '92', '89', '125'],
+            '36-50': ['75', '88', '102', '82', '85', '115'],
+            '51-65': ['52', '62', '75', '58', '68', '82'],
+            'Over 65': ['28', '35', '42', '32', '41', '48'],
+            'Total': ['480', '517', '577', '504', '506', '620']
+        }),
+        'claims_by_member': pd.DataFrame({
+            'Member Type': ['8a Employee', '8b Spouse', '8c Dependents', '8d Totals'],
+            'IP': ['52000', '31500', '21200', '104700'],
+            'OP': ['26500', '16800', '11300', '54600'],
+            'Pharmacy': ['18200', '12400', '7800', '38400'],
+            'Dental': ['9200', '6100', '3900', '19200'],
+            'Optical': ['2800', '1900', '1200', '5900'],
+            'Totals': ['108700', '68700', '45400', '222800']
+        }),
+        'claims_per_month': pd.DataFrame({
+            'Month ending date': ['31-Jan-2024', '29-Feb-2024', '31-Mar-2024', '30-Apr-2024', 
+                                 '31-May-2024', '30-Jun-2024', '31-Jul-2024', '31-Aug-2024',
+                                 '30-Sep-2024', '31-Oct-2024', '30-Nov-2024', '31-Dec-2024', 'TOTAL'],
+            'Year': ['2024', '2024', '2024', '2024', '2024', '2024', 
+                    '2024', '2024', '2024', '2024', '2024', '2024', ''],
+            'Value': ['45000', '47200', '51300', '48900', '52100', '49800',
+                     '53200', '50400', '48600', '51800', '49300', '52400', '600000']
+        })
+    }
 
 if __name__ == "__main__":
     main()
