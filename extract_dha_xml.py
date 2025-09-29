@@ -103,5 +103,4 @@ def extract_dha_tables(xml_path):
 # Example usage:
 # tables = extract_dha_tables("Extraction template for DHA.xml")
 # for k, df in tables.items():
-#     if k != "report_date": print(f"{k}:
-", df)
+#     if k != "report_date": print(f"{k}:\n", df)
