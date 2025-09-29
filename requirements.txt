@@ -1,8 +1,5 @@
-streamlit
-pdfplumber
-camelot-py
-tabula-py
-pandas
-pdf2image
-pytesseract
-Pillow
+streamlit>=1.36
+pdf2image>=1.17
+pytesseract>=0.3.10
+pillow>=10.0.0
+pandas>=2.1
