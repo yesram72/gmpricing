@@ -273,13 +273,10 @@ def extract_tables_tabula(pdf_path):
 # -----------------------------
 # EasyOCR fallback (line-based, code-anchored)
 # -----------------------------
+@st.cache_resource(show_spinner=False)
 def _easyocr_reader():
-    reader = st.session_state.get("_easyocr_reader")
-    if reader is None:
-        import easyocr
-        reader = easyocr.Reader(['en'], gpu=False)
-        st.session_state["_easyocr_reader"] = reader
-    return reader
+    import easyocr
+    return easyocr.Reader(['en'], gpu=False)
 
 def _ocr_lines_easyocr(img):
     reader = _easyocr_reader()
@@ -405,7 +402,8 @@ st.sidebar.header("Options")
 show_all_tables = st.sidebar.checkbox("Show ALL extracted tables", value=False)
 enable_easyocr = st.sidebar.checkbox("Enable OCR fallback (EasyOCR) if sections are missing", value=True)
 
-uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"])
+uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"])  # fixed: no stray \n
+
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.read())
@@ -433,7 +431,10 @@ if uploaded_file:
     # EasyOCR fallback
     if enable_easyocr and any(x is None for x in [section6_df, section7_df, section8_df, section17_df]):
         if EASYOCR_AVAILABLE:
-            o6, o7, o8, o17 = extract_with_easyocr(pdf_path)
+            with st.spinner("Preparing OCR models (first run can take a few minutes)..."):
+                _ = _easyocr_reader()
+            with st.spinner("Running OCR fallback..."):
+                o6, o7, o8, o17 = extract_with_easyocr(pdf_path)
             section6_df = section6_df or o6
             section7_df = section7_df or o7
             section8_df = section8_df or o8
