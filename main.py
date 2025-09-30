@@ -11,37 +11,33 @@ import camelot
 import tabula
 from pdf2image import convert_from_path
 import pytesseract
+import numpy as np
+
+# Optional EasyOCR (lazy import only when needed)
+EASYOCR_AVAILABLE = True
+try:
+    import easyocr  # noqa: F401
+except Exception:
+    EASYOCR_AVAILABLE = False
 
 # -----------------------------
 # Constants (fixed table shapes)
 # -----------------------------
 AGE_BANDS = ["0-15", "16-25", "26-35", "36-50", "51-65", "Over 65"]
 CLAIM_COLS = ["IP", "OP", "Pharmacy", "Dental", "Optical", "Totals"]
+MONTHS = [
+    "JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"
+]
 
-CENSUS6_ROWS = {
-    "6a": "Male",
-    "6b": "Single females",
-    "6c": "Married females",
-}
-CENSUS7_ROWS = {
-    "7a": "Male",
-    "7b": "Single females",
-    "7c": "Married females",
-}
-CLAIMS8_ROWS = {
-    "8a": "Employee",
-    "8b": "Spouse",
-    "8c": "Dependents",
-    "8d": "Totals",
-}
-# Section 17: codes 17a..17m (up to 13 rows)
-SECTION17_CODES = [f"17{chr(ord('a')+i)}" for i in range(13)]
+CENSUS6_ROWS = {"6a": "Male", "6b": "Single females", "6c": "Married females"}
+CENSUS7_ROWS = {"7a": "Male", "7b": "Single females", "7c": "Married females"}
+CLAIMS8_ROWS = {"8a": "Employee", "8b": "Spouse", "8c": "Dependents", "8d": "Totals"}
+SECTION17_CODES = [f"17{chr(ord('a')+i)}" for i in range(13)]  # 17a..17m
 
 # -----------------------------
 # Utilities
 # -----------------------------
 def n(s: str) -> str:
-    """Normalize text for matching."""
     if s is None:
         return ""
     s = str(s).lower()
@@ -49,22 +45,19 @@ def n(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 def parse_num(x):
-    """Parse numeric cell with commas, dashes and blanks."""
     if x is None:
         return None
     s = str(x).strip()
     if s in ("", "-", "—", "–"):
         return None
-    # keep digits, minus and dot; we'll strip commas next
-    s = re.sub(r"[^0-9\-\.]+", "", s)
     s = s.replace(",", "")
+    s = re.sub(r"[^0-9\-\.]+", "", s)
     try:
         return float(s)
     except Exception:
         return None
 
 def first_row_as_header_if_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """If columns are positional (0..n), use the first row as header."""
     if list(df.columns) == list(range(len(df.columns))) and len(df) > 1:
         header = df.iloc[0].astype(str).tolist()
         df = pd.DataFrame(df.iloc[1:].values, columns=header)
@@ -77,11 +70,9 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 def age_band_key(header_text: str):
-    """Map a header token to a canonical age band, if possible."""
     t = n(header_text)
     if "over" in t and "65" in t:
         return "Over 65"
-    # 0-15, 16-25, etc. (support dash variants and no-dash)
     m = re.search(r"(\d{1,2})\s*[-–]?\s*(\d{1,2})", t)
     if m:
         a, b = int(m.group(1)), int(m.group(2))
@@ -124,7 +115,6 @@ def map_claim_columns(df: pd.DataFrame):
     return mapping
 
 def map_m17_columns(df: pd.DataFrame):
-    """Map columns for Section 17: Month ending date, Year, Value."""
     mapping = {}
     for c in df.columns:
         cn = n(c)
@@ -136,22 +126,16 @@ def map_m17_columns(df: pd.DataFrame):
             mapping["value"] = c
     return mapping
 
-# -----------------------------
-# Row-code detection
-# -----------------------------
 def detect_row_code_and_label(row_vals, expected_codes: set[str]):
-    """Find a row code like '6a' or '17a' from first few cells; return (code, label_text_after_code)."""
     candidates = [str(v) for v in row_vals[:3] if str(v).strip()]
-    # separate cell exact match
+    # exact code in its own cell
     for i, v in enumerate(candidates):
         nv = n(v)
         for code in expected_codes:
             if nv == code:
-                label = ""
-                if i + 1 < len(candidates):
-                    label = candidates[i + 1]
+                label = candidates[i + 1] if i + 1 < len(candidates) else ""
                 return code, label
-    # combined like "6a Male" or "17a SEPTEMBER"
+    # combined like "6a Male"
     for v in candidates:
         nv = n(v)
         for code in expected_codes:
@@ -161,7 +145,7 @@ def detect_row_code_and_label(row_vals, expected_codes: set[str]):
     return None, None
 
 # -----------------------------
-# Anchored extraction for Sections 6,7,8
+# Anchored extraction (engines)
 # -----------------------------
 def extract_census(df_raw: pd.DataFrame, code_to_label: dict[str, str]):
     df = normalize_columns(df_raw)
@@ -186,7 +170,6 @@ def extract_census(df_raw: pd.DataFrame, code_to_label: dict[str, str]):
         vals = {band: parse_num(row.get(age_map.get(band))) for band in AGE_BANDS}
         out_rows.append({"row": f"{code} {label}", **vals})
     out = pd.DataFrame(out_rows).set_index("row")[AGE_BANDS]
-    # Add a Total column to mirror consolidated view
     out["Total"] = out[AGE_BANDS].sum(axis=1, skipna=True)
     return out
 
@@ -218,9 +201,6 @@ def extract_claims(df_raw: pd.DataFrame):
     out = pd.DataFrame(rows).set_index("row")[CLAIM_COLS]
     return out
 
-# -----------------------------
-# Anchored extraction for Section 17 (static layout)
-# -----------------------------
 def extract_section17(df_raw: pd.DataFrame):
     df = normalize_columns(df_raw)
     if df.empty:
@@ -232,35 +212,23 @@ def extract_section17(df_raw: pd.DataFrame):
     found = {}
     for _, row in df.iterrows():
         code, after = detect_row_code_and_label(row.values.tolist(), set(SECTION17_CODES))
-        if not code:
-            continue
-        if code in found:
+        if not code or code in found:
             continue
         month_txt = row.get(m["month"]) if m.get("month") in row else after or ""
         year_val = row.get(m["year"]) if m.get("year") in row else ""
         value_val = row.get(m["value"]) if m.get("value") in row else None
-        found[code] = {
-            "Month ending date": str(month_txt).strip(),
-            "Year": str(year_val).strip(),
-            "Value": parse_num(value_val),
-        }
+        found[code] = {"Month ending date": str(month_txt).strip(), "Year": str(year_val).strip(), "Value": parse_num(value_val)}
 
     if not found:
         return None
 
-    # Order by code sequence 17a..17m and build DataFrame
-    rows = []
-    for code in SECTION17_CODES:
-        if code in found:
-            rows.append(found[code])
+    rows = [found[c] for c in SECTION17_CODES if c in found]
     if not rows:
         return None
 
-    out = pd.DataFrame(rows, columns=["Month ending date", "Year", "Value"])  # fixed shape
-    # Append TOTAL row like consolidated view
+    out = pd.DataFrame(rows, columns=["Month ending date", "Year", "Value"])
     total_val = pd.to_numeric(out["Value"], errors="coerce").sum()
-    total_row = {"Month ending date": "TOTAL", "Year": "", "Value": total_val}
-    out = pd.concat([out, pd.DataFrame([total_row])], ignore_index=True)
+    out = pd.concat([out, pd.DataFrame([{"Month ending date": "TOTAL", "Year": "", "Value": total_val}])], ignore_index=True)
     return out
 
 # -----------------------------
@@ -303,64 +271,153 @@ def extract_tables_tabula(pdf_path):
     return results
 
 # -----------------------------
-# OCR fallback (guarded)
+# EasyOCR fallback (line-based, code-anchored)
 # -----------------------------
-def extract_tables_ocr(pdf_path):
-    missing = []
-    if not shutil.which("pdfinfo") or not shutil.which("pdftoppm"):
-        missing.append("Poppler")
-    if not shutil.which("tesseract"):
-        missing.append("Tesseract")
-    if missing:
-        st.warning(f"OCR skipped: {', '.join(missing)} not found on server yet.")
-        return []
+def _easyocr_reader():
+    reader = st.session_state.get("_easyocr_reader")
+    if reader is None:
+        import easyocr
+        reader = easyocr.Reader(['en'], gpu=False)
+        st.session_state["_easyocr_reader"] = reader
+    return reader
 
-    try:
-        images = convert_from_path(pdf_path)
-    except Exception as e:
-        st.warning(f"OCR skipped (convert_from_path failed): {e}")
-        return []
-
-    dfs = []
-    for img in images:
+def _ocr_lines_easyocr(img):
+    reader = _easyocr_reader()
+    res = reader.readtext(np.array(img), detail=1, paragraph=False)
+    # res: list of ((x,y) quad, text, conf)
+    items = []
+    for bbox, text, conf in res:
         try:
-            text = pytesseract.image_to_string(img)
+            ys = [p[1] for p in bbox]
+            xs = [p[0] for p in bbox]
+            cy = sum(ys) / len(ys)
+            cx = sum(xs) / len(xs)
+            items.append((cy, cx, text))
         except Exception:
             continue
-        lines = [l for l in text.split('\n') if l.strip()]
-        dfs.append(pd.DataFrame({"ocr_text": lines}))
-    return dfs
+    items.sort(key=lambda t: (t[0], t[1]))
+    lines = []
+    if not items:
+        return lines
+    current = [items[0]]
+    for it in items[1:]:
+        if abs(it[0] - current[-1][0]) <= 12:  # same-line threshold
+            current.append(it)
+        else:
+            line_text = " ".join([x[2] for x in sorted(current, key=lambda t: t[1])])
+            lines.append(line_text)
+            current = [it]
+    line_text = " ".join([x[2] for x in sorted(current, key=lambda t: t[1])])
+    lines.append(line_text)
+    return lines
+
+def extract_with_easyocr(pdf_path):
+    if not EASYOCR_AVAILABLE:
+        return None, None, None, None
+    try:
+        images = convert_from_path(pdf_path, dpi=240)
+    except Exception:
+        return None, None, None, None
+
+    census6_rows, census7_rows, claims8_rows, m17_rows = {}, {}, {}, {}
+    code_pat = re.compile(r"^(6[abc]|7[abc]|8[abcd]|17[a-m])\b", flags=re.I)
+    num_pat = re.compile(r"(\d[\d,]*)")
+
+    for img in images:
+        for ln in _ocr_lines_easyocr(img):
+            ln_clean = ln.strip()
+            m = code_pat.match(ln_clean)
+            if not m:
+                continue
+            code = m.group(1).lower()
+            nums = [parse_num(x) for x in num_pat.findall(ln_clean)]
+            # census 6/7
+            if code in CENSUS6_ROWS and len(nums) >= 6:
+                census6_rows[code] = nums[:6]
+            elif code in CENSUS7_ROWS and len(nums) >= 6:
+                census7_rows[code] = nums[:6]
+            # claims 8
+            elif code in CLAIMS8_ROWS and len(nums) >= 5:
+                claims8_rows[code] = nums[:6]
+            # section 17
+            elif code in SECTION17_CODES:
+                upper = ln_clean.upper()
+                month = next((mname for mname in MONTHS if mname in upper), "")
+                year_match = re.search(r"\b(20\d{2}|19\d{2})\b", ln_clean)
+                year = year_match.group(1) if year_match else ""
+                value = nums[-1] if nums else None
+                if month or year or value is not None:
+                    m17_rows[code] = {"Month ending date": month, "Year": year, "Value": value}
+
+    sec6 = sec7 = sec8 = sec17 = None
+    if all(k in census6_rows for k in CENSUS6_ROWS.keys()):
+        rows = []
+        for k, label in CENSUS6_ROWS.items():
+            vals = census6_rows.get(k)
+            if not vals: break
+            rows.append({"row": f"{k} {label}", **{band: vals[i] for i, band in enumerate(AGE_BANDS)}})
+        if rows:
+            sec6 = pd.DataFrame(rows).set_index("row")[AGE_BANDS]
+            sec6["Total"] = sec6[AGE_BANDS].sum(axis=1, skipna=True)
+
+    if all(k in census7_rows for k in CENSUS7_ROWS.keys()):
+        rows = []
+        for k, label in CENSUS7_ROWS.items():
+            vals = census7_rows.get(k)
+            if not vals: break
+            rows.append({"row": f"{k} {label}", **{band: vals[i] for i, band in enumerate(AGE_BANDS)}})
+        if rows:
+            sec7 = pd.DataFrame(rows).set_index("row")[AGE_BANDS]
+            sec7["Total"] = sec7[AGE_BANDS].sum(axis=1, skipna=True)
+
+    if all(k in claims8_rows for k in CLAIMS8_ROWS.keys()):
+        rows = []
+        for k, label in CLAIMS8_ROWS.items():
+            vals = claims8_rows.get(k)
+            if not vals: break
+            cols = ["IP", "OP", "Pharmacy", "Dental", "Optical", "Totals"]
+            col_vals = {}
+            for i, c in enumerate(cols):
+                col_vals[c] = vals[i] if i < len(vals) else None
+            if col_vals["Totals"] is None:
+                tot = sum(v or 0 for v in [col_vals[c] for c in cols[:-1]])
+                col_vals["Totals"] = tot
+            rows.append({"row": f"{k} {label}", **col_vals})
+        if rows:
+            sec8 = pd.DataFrame(rows).set_index("row")[CLAIM_COLS]
+
+    if m17_rows:
+        ordered = [m17_rows[c] for c in SECTION17_CODES if c in m17_rows]
+        if ordered:
+            sec17 = pd.DataFrame(ordered, columns=["Month ending date", "Year", "Value"])
+            total_val = pd.to_numeric(sec17["Value"], errors="coerce").sum()
+            sec17 = pd.concat([sec17, pd.DataFrame([{"Month ending date": "TOTAL", "Year": "", "Value": total_val}])], ignore_index=True)
+
+    return sec6, sec7, sec8, sec17
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
 st.set_page_config(page_title="DHA Report PDF Extractor", layout="wide")
-st.title("DHA Report PDF Extractor")
+st.title("Data Input from DHA Report")
 
 st.sidebar.header("Options")
 show_all_tables = st.sidebar.checkbox("Show ALL extracted tables", value=False)
-enable_ocr = st.sidebar.checkbox("Enable OCR fallback if sections are missing", value=True)
+enable_easyocr = st.sidebar.checkbox("Enable OCR fallback (EasyOCR) if sections are missing", value=True)
 
-uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"]) 
-
+uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"])\n
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.read())
         pdf_path = tmp_file.name
 
-    # Extract with multiple engines
+    # Try table engines first
     plumber_tables = extract_tables_pdfplumber(pdf_path)
     camelot_tables = extract_tables_camelot(pdf_path)
     tabula_tables = extract_tables_tabula(pdf_path)
-
     all_tables = plumber_tables + camelot_tables + tabula_tables
 
-    # Anchored extraction by codes
-    section6_df = None
-    section7_df = None
-    section8_df = None
-    section17_df = None
-
+    section6_df = section7_df = section8_df = section17_df = None
     for df in all_tables:
         if section6_df is None:
             section6_df = extract_census(df, CENSUS6_ROWS)
@@ -373,13 +430,18 @@ if uploaded_file:
         if all(x is not None for x in [section6_df, section7_df, section8_df, section17_df]):
             break
 
-    # OCR fallback best-effort (not reconstructing anchored rows here)
-    if enable_ocr and any(x is None for x in [section6_df, section7_df, section8_df, section17_df]):
-        _ocr_tables = extract_tables_ocr(pdf_path)
+    # EasyOCR fallback
+    if enable_easyocr and any(x is None for x in [section6_df, section7_df, section8_df, section17_df]):
+        if EASYOCR_AVAILABLE:
+            o6, o7, o8, o17 = extract_with_easyocr(pdf_path)
+            section6_df = section6_df or o6
+            section7_df = section7_df or o7
+            section8_df = section8_df or o8
+            section17_df = section17_df or o17
+        else:
+            st.info("EasyOCR not installed. Install easyocr to enable OCR fallback.")
 
-    # Render results in consolidated order
-    st.header("Data Input from DHA Report")
-
+    # Render
     st.subheader("Population census (at beginning of reporting period)")
     st.dataframe(section6_df if section6_df is not None else pd.DataFrame(columns=AGE_BANDS + ["Total"]))
 
@@ -396,18 +458,18 @@ if uploaded_file:
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         if section6_df is not None:
-            st.download_button("Download Section 6 CSV", section6_df.to_csv().encode("utf-8"), file_name="section6.csv", mime="text/csv")
+            st.download_button("Download Section 6 CSV", section6_df.to_csv().encode("utf-8"), "section6.csv", "text/csv")
     with c2:
         if section7_df is not None:
-            st.download_button("Download Section 7 CSV", section7_df.to_csv().encode("utf-8"), file_name="section7.csv", mime="text/csv")
+            st.download_button("Download Section 7 CSV", section7_df.to_csv().encode("utf-8"), "section7.csv", "text/csv")
     with c3:
         if section17_df is not None:
-            st.download_button("Download Section 17 CSV", section17_df.to_csv(index=False).encode("utf-8"), file_name="section17.csv", mime="text/csv")
+            st.download_button("Download Section 17 CSV", section17_df.to_csv(index=False).encode("utf-8"), "section17.csv", "text/csv")
     with c4:
         if section8_df is not None:
-            st.download_button("Download Section 8 CSV", section8_df.to_csv().encode("utf-8"), file_name="section8.csv", mime="text/csv")
+            st.download_button("Download Section 8 CSV", section8_df.to_csv().encode("utf-8"), "section8.csv", "text/csv")
 
-    # Optional debugging
+    # Optional: raw table diagnostics
     if show_all_tables:
         st.header("All Extracted Tables (raw)")
         for source, tables in (("pdfplumber", plumber_tables), ("camelot", camelot_tables), ("tabula", tabula_tables)):
@@ -420,5 +482,3 @@ if uploaded_file:
     os.unlink(pdf_path)
 else:
     st.info("Please upload a DHA PDF report to begin.")
-
-st.caption("Anchored on codes 6a–6c, 7a–7c, 8a–8d and 17a–17m. Output tables are fixed in shape to match the consolidated view. Only numeric cells are extracted.")
