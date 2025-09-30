@@ -405,7 +405,7 @@ st.sidebar.header("Options")
 show_all_tables = st.sidebar.checkbox("Show ALL extracted tables", value=False)
 enable_easyocr = st.sidebar.checkbox("Enable OCR fallback (EasyOCR) if sections are missing", value=True)
 
-uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"])\n
+uploaded_file = st.file_uploader("Upload DHA Report PDF", type=["pdf"])
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.read())
