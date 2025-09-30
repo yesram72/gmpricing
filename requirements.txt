@@ -9,3 +9,5 @@ tabula-py>=2.9.0
 numpy>=1.23
 opencv-python-headless>=4.8
 easyocr>=1.7.1
+# Optional: remove the jpype warning and enable faster tabula integration
+JPype1>=1.4.1
